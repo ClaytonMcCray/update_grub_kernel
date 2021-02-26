@@ -15,7 +15,6 @@ import (
 var (
 	grubCfg               = flag.String("grub_cfg", "/boot/grub/grub.cfg", "Grub config file to parse")
 	grubDefaultsFile      = flag.String("grub_defaults", "/etc/default/grub", "Where to write selected kernel")
-	grep                  = flag.String("grep_prg", "rg", "Grep-like program")
 	shell                 = flag.String("shell", "zsh", "Shell to execute in")
 	overrideBackupFailure = flag.Bool("override_backup_failure", false, "Keep going if backing up grub_defaults fails")
 	updateGrubPrg         = flag.String("update_grub_prg", "update-grub2", "Program to run to update grub after setting new default")
@@ -23,33 +22,27 @@ var (
 )
 
 const (
-	searchOpts     = "-F"
 	shellOpts      = "-c"
 	grubDefaultKey = "GRUB_DEFAULT"
+	searchPhrase   = "$menuentry_id_option "
 )
 
 func main() {
 	flag.Parse()
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	c := exec.Command(*shell, shellOpts, fmt.Sprintf("%s %s %s %s", *grep, searchOpts, searchPhraseForGrep(), *grubCfg))
-	e, err := c.Output()
+	f, err := os.Open(*grubCfg)
 	if err != nil {
-		log.Printf("Output: %s", e)
-		log.Printf("Command run: %s", c.String())
-		log.Fatal(err)
+		log.Fatalf("could not open grub config: %s", err)
+	}
+	defer f.Close()
+
+	grubCfgBody, err := io.ReadAll(f)
+	if err != nil {
+		log.Fatalf("error reading grub config: %s", err)
 	}
 
-	entries := strings.Split(string(e), "\n")
-	kernels := []string{}
-	for _, entry := range entries {
-		processed, err := process(entry)
-		if err != nil {
-			log.Printf("error processing line %s, skipping", entry)
-		}
-
-		kernels = append(kernels, processed)
-	}
+	kernels := findKernels(string(grubCfgBody))
 
 	kernelSelection := kernels[userSelectsKernel(kernels)]
 
@@ -66,19 +59,37 @@ func main() {
 	}
 
 	if *runUpdateGrub {
-		c = exec.Command(*shell, shellOpts, *updateGrubPrg)
+		c := exec.Command(*shell, shellOpts, *updateGrubPrg)
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
 		c.Run()
 	}
 }
 
+func findKernels(fileBody string) []string {
+	lines := strings.Split(fileBody, "\n")
+	kernels := []string{}
+
+	for _, entry := range lines {
+		if strings.Contains(entry, searchPhrase) {
+			k, err := process(entry)
+			if err != nil {
+				log.Printf("error processing line %s. error: %s", entry, err)
+			}
+
+			kernels = append(kernels, strings.ReplaceAll(k, "'", "\""))
+		}
+	}
+
+	return kernels
+}
+
 func backupDefaultsFile() error {
 	f, err := os.Open(*grubDefaultsFile)
-	defer f.Close()
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
 	fbak, err := os.Create(*grubDefaultsFile + ".bak")
 	defer fbak.Close()
@@ -126,7 +137,7 @@ func writeNewDefault(kernel string) error {
 
 	f.Close() // close from when it was open to read
 
-	linesWithoutDefault = append(linesWithoutDefault, grubDefaultKey+"="+strings.ReplaceAll(kernel, "'", "\""))
+	linesWithoutDefault = append(linesWithoutDefault, grubDefaultKey+"="+kernel)
 	f, err = os.OpenFile(*grubDefaultsFile, os.O_RDWR, permForDefaults)
 	defer f.Close()
 	if err != nil {
@@ -164,14 +175,6 @@ func userSelectsKernel(kernels []string) int {
 	}
 }
 
-func searchPhraseGolang() string {
-	return "$menuentry_id_option "
-}
-
-func searchPhraseForGrep() string {
-	return fmt.Sprintf("\"\\%s\"", searchPhraseGolang())
-}
-
 func process(line string) (string, error) {
 	tmp, err := cutFront(line)
 	if err != nil {
@@ -187,12 +190,12 @@ func process(line string) (string, error) {
 }
 
 func cutFront(line string) (string, error) {
-	idx := strings.Index(line, searchPhraseGolang())
+	idx := strings.Index(line, searchPhrase)
 	if idx < 0 {
-		return "", fmt.Errorf("error cutFront: %s not found in %s", searchPhraseGolang(), line)
+		return "", fmt.Errorf("error cutFront: %s not found in %s", searchPhrase, line)
 	}
 
-	return line[idx+len(searchPhraseGolang()):], nil
+	return line[idx+len(searchPhrase):], nil
 }
 
 func cutRear(line string) (string, error) {
