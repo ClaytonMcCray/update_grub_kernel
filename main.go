@@ -103,30 +103,49 @@ func backupDefaultsFile() error {
 	return err
 }
 
+// readReducedDefaults reads the defaults file and removes blank lines.
+func readReducedDefaults(f io.Reader) ([]string, error) {
+	fb, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(fb), "\n")
+	reduced := []string{}
+	for _, l := range lines {
+		if l == "" || l == "\n" {
+			continue
+		}
+
+		reduced = append(reduced, l)
+	}
+
+	return reduced, nil
+}
+
 func writeNewDefault(kernel string) error {
 	f, err := os.Open(*grubDefaultsFile)
-	defer f.Close()
 	if err != nil {
 		log.Printf("opening %s: %s", *grubDefaultsFile, err)
 		return err
 	}
+	defer f.Close()
+
+	lines, err := readReducedDefaults(f)
+	if err != nil {
+		log.Printf("error reading %s: %s", f.Name(), err)
+		return err
+	}
 
 	inf, err := f.Stat()
+	f.Close() // close from when it was open to read
 	if err != nil {
 		log.Printf("error getting stat for %s: %s", f.Name(), err)
 	}
 
 	permForDefaults := inf.Mode()
 
-	fb, err := io.ReadAll(f)
-	if err != nil {
-		log.Printf("reading from %s: %s", f.Name(), err)
-		return err
-	}
-
-	lines := strings.Split(string(fb), "\n")
 	linesWithoutDefault := []string{}
-
 	for _, l := range lines {
 		if strings.HasPrefix(l, grubDefaultKey+"=") {
 			continue
@@ -135,15 +154,13 @@ func writeNewDefault(kernel string) error {
 		linesWithoutDefault = append(linesWithoutDefault, l)
 	}
 
-	f.Close() // close from when it was open to read
-
 	linesWithoutDefault = append(linesWithoutDefault, grubDefaultKey+"="+kernel)
 	f, err = os.OpenFile(*grubDefaultsFile, os.O_RDWR, permForDefaults)
-	defer f.Close()
 	if err != nil {
 		log.Printf("opening %s: %s", *grubDefaultsFile, err)
 		return err
 	}
+	defer f.Close()
 
 	_, err = f.Write([]byte(strings.Join(linesWithoutDefault, "\n") + "\n"))
 	if err != nil {

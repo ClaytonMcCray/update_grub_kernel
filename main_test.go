@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"bytes"
+	"strings"
+	"testing"
+)
 
 func TestCutFront(t *testing.T) {
 	initial := "152:menuentry 'Ubuntu, with Linux 5.11.0' --class ubuntu --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-5.11.0-advanced-b70cb823-9505-4ab6-bc0a-ca359515bf03' {"
@@ -76,8 +80,84 @@ func TestFindKernels(t *testing.T) {
 	}
 }
 
-var examplegrubcfg = `
-### BEGIN /etc/grub.d/05_debian_theme ###
+func TestReadReducedDefaults(t *testing.T) {
+	expected := strings.Split(examplegrubdefaultsnolines, "\n")
+	actual, err := readReducedDefaults(bytes.NewReader([]byte(examplegrubdefaults)))
+
+	if err != nil {
+		t.Errorf("got err = %s, expected nil", err)
+	}
+
+	for i, a := range actual {
+		if a != expected[i] {
+			t.Errorf("error in TestReadReducedDefautlts (outer qoutes inserted): expected \"%s\", got \"%s\"", expected[i], a)
+		}
+	}
+}
+
+const (
+	examplegrubdefaults = `# If you change this file, run 'update-grub' afterwards to update
+# /boot/grub/grub.cfg.
+# For full documentation of the options in this file, see:
+#   info -f grub -n 'Simple configuration'
+
+GRUB_TIMEOUT_STYLE=menu
+GRUB_TIMEOUT=10
+GRUB_CMDLINE_LINUX_DEFAULT=""
+GRUB_CMDLINE_LINUX=""
+GRUB_DISABLE_SUBMENU=y
+
+# Uncomment to enable BadRAM filtering, modify to suit your needs
+# This works with Linux (no patch required) and with any kernel that obtains
+# the memory map information from GRUB (GNU Mach, kernel of FreeBSD ...)
+#GRUB_BADRAM="0x01234567,0xfefefefe,0x89abcdef,0xefefefef"
+
+# Uncomment to disable graphical terminal (grub-pc only)
+#GRUB_TERMINAL=console
+
+# The resolution used on graphical terminal
+# note that you can use only modes which your graphic card supports via VBE
+#GRUB_GFXMODE=640x480
+
+# Uncomment if you don't want GRUB to pass "root=UUID=xxx" parameter to Linux
+GRUB_DISABLE_LINUX_UUID=true
+
+# Uncomment to disable generation of recovery mode menu entries
+#GRUB_DISABLE_RECOVERY="true"
+
+# Uncomment to get a beep at grub start
+#GRUB_INIT_TUNE="480 440 1"
+
+GRUB_DEFAULT="gnulinux-5.11.0-advanced-b70cb823-9505-4ab6-bc0a-ca359515bf03"
+`
+	examplegrubdefaultsnolines = `# If you change this file, run 'update-grub' afterwards to update
+# /boot/grub/grub.cfg.
+# For full documentation of the options in this file, see:
+#   info -f grub -n 'Simple configuration'
+GRUB_TIMEOUT_STYLE=menu
+GRUB_TIMEOUT=10
+GRUB_CMDLINE_LINUX_DEFAULT=""
+GRUB_CMDLINE_LINUX=""
+GRUB_DISABLE_SUBMENU=y
+# Uncomment to enable BadRAM filtering, modify to suit your needs
+# This works with Linux (no patch required) and with any kernel that obtains
+# the memory map information from GRUB (GNU Mach, kernel of FreeBSD ...)
+#GRUB_BADRAM="0x01234567,0xfefefefe,0x89abcdef,0xefefefef"
+# Uncomment to disable graphical terminal (grub-pc only)
+#GRUB_TERMINAL=console
+# The resolution used on graphical terminal
+# note that you can use only modes which your graphic card supports via VBE
+#GRUB_GFXMODE=640x480
+# Uncomment if you don't want GRUB to pass "root=UUID=xxx" parameter to Linux
+GRUB_DISABLE_LINUX_UUID=true
+# Uncomment to disable generation of recovery mode menu entries
+#GRUB_DISABLE_RECOVERY="true"
+# Uncomment to get a beep at grub start
+#GRUB_INIT_TUNE="480 440 1"
+GRUB_DEFAULT="gnulinux-5.11.0-advanced-b70cb823-9505-4ab6-bc0a-ca359515bf03"
+`
+
+	examplegrubcfg = `### BEGIN /etc/grub.d/05_debian_theme ###
 set menu_color_normal=white/black
 set menu_color_highlight=black/light-gray
 ### END /etc/grub.d/05_debian_theme ###
@@ -162,3 +242,4 @@ menuentry 'Ubuntu, with Linux 5.11.0.old' --class ubuntu --class gnu-linux --cla
 	echo	'Loading initial ramdisk ...'
 	initrd	/boot/initrd.img-5.11.0
 }`
+)
