@@ -124,7 +124,7 @@ func readReducedDefaults(f io.Reader) ([]string, error) {
 }
 
 func writeNewDefault(kernel string) error {
-	f, err := os.Open(*grubDefaultsFile)
+	f, err := os.OpenFile(*grubDefaultsFile, os.O_RDWR, 0000 /* not used, file exists */)
 	if err != nil {
 		log.Printf("opening %s: %s", *grubDefaultsFile, err)
 		return err
@@ -137,13 +137,7 @@ func writeNewDefault(kernel string) error {
 		return err
 	}
 
-	inf, err := f.Stat()
-	f.Close() // close from when it was open to read
-	if err != nil {
-		log.Printf("error getting stat for %s: %s", f.Name(), err)
-	}
-
-	permForDefaults := inf.Mode()
+	f.Truncate(0) // remove contents
 
 	linesWithoutDefault := []string{}
 	for _, l := range lines {
@@ -155,14 +149,8 @@ func writeNewDefault(kernel string) error {
 	}
 
 	linesWithoutDefault = append(linesWithoutDefault, grubDefaultKey+"="+kernel)
-	f, err = os.OpenFile(*grubDefaultsFile, os.O_RDWR, permForDefaults)
-	if err != nil {
-		log.Printf("opening %s: %s", *grubDefaultsFile, err)
-		return err
-	}
-	defer f.Close()
 
-	_, err = f.Write([]byte(strings.Join(linesWithoutDefault, "\n") + "\n"))
+	_, err = f.WriteAt([]byte(strings.Join(linesWithoutDefault, "\n")+"\n"), 0)
 	if err != nil {
 		log.Printf("error writing %s: %s", f.Name(), err)
 		return err
