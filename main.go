@@ -12,15 +12,6 @@ import (
 	"strings"
 )
 
-var (
-	grubCfg               = flag.String("grub_cfg", "/boot/grub/grub.cfg", "Grub config file to parse")
-	grubDefaultsFile      = flag.String("grub_defaults", "/etc/default/grub", "Where to write selected kernel")
-	shell                 = flag.String("shell", "zsh", "Shell to execute in")
-	overrideBackupFailure = flag.Bool("override_backup_failure", false, "Keep going if backing up grub_defaults fails")
-	updateGrubPrg         = flag.String("update_grub_prg", "update-grub2", "Program to run to update grub after setting new default")
-	runUpdateGrub         = flag.Bool("run_update_grub", true, "Whether or not to run update_grub_prg")
-)
-
 const (
 	shellOpts      = "-c"
 	grubDefaultKey = "GRUB_DEFAULT"
@@ -28,42 +19,73 @@ const (
 )
 
 func main() {
-	flag.Parse()
+	if err := Run(os.Stdin, os.Stderr, os.Stdout, os.Args); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func Run(stdin io.Reader, stderr, stdout io.Writer, args []string) error {
+	log.SetOutput(stderr)
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	f, err := os.Open(*grubCfg)
-	if err != nil {
-		log.Fatalf("could not open grub config: %s", err)
-	}
-	defer f.Close()
+	flags := flag.NewFlagSet(args[0], flag.ExitOnError)
+	var (
+		grubCfg               = flags.String("grub_cfg", "/boot/grub/grub.cfg", "Grub config file to parse")
+		grubDefaultsFile      = flags.String("grub_defaults", "/etc/default/grub", "Where to write selected kernel")
+		shell                 = flags.String("shell", "zsh", "Shell to execute in")
+		overrideBackupFailure = flags.Bool("override_backup_failure", false, "Keep going if backing up grub_defaults fails")
+		updateGrubPrg         = flags.String("update_grub_prg", "update-grub2", "Program to run to update grub after setting new default")
+		runUpdateGrub         = flags.Bool("run_update_grub", true, "Whether or not to run update_grub_prg")
+	)
 
-	grubCfgBody, err := io.ReadAll(f)
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	grubCfgBody, err := readFile(*grubCfg)
 	if err != nil {
-		log.Fatalf("error reading grub config: %s", err)
+		return fmt.Errorf("error opening grubCfg: %s", err)
 	}
 
 	kernels := findKernels(string(grubCfgBody))
 
 	kernelSelection := kernels[userSelectsKernel(kernels)]
 
-	if err = backupDefaultsFile(); err != nil {
+	if err := backupDefaultsFile(*grubDefaultsFile); err != nil {
 		if *overrideBackupFailure {
 			log.Printf("failure during backup, continuing: %s", err)
 		} else {
-			log.Fatalf("failure during backup: %s", err)
+			return fmt.Errorf("failure during backup: %s", err)
 		}
 	}
 
-	if err = writeNewDefault(kernelSelection); err != nil {
-		log.Fatalf("error writing new default; note user must be root: %s", err)
+	if err := writeNewDefault(kernelSelection, *grubDefaultsFile); err != nil {
+		return fmt.Errorf("error writing new default; note user must be root: %s", err)
 	}
 
 	if *runUpdateGrub {
 		c := exec.Command(*shell, shellOpts, *updateGrubPrg)
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
+		c.Stdout = stdout
+		c.Stderr = stderr
 		c.Run()
 	}
+
+	return nil
+}
+
+func readFile(name string) ([]byte, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("could not open grub config: %s", err)
+	}
+	defer f.Close()
+
+	body, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("error reading grub config: %s", err)
+	}
+
+	return body, nil
 }
 
 func findKernels(fileBody string) []string {
@@ -84,22 +106,16 @@ func findKernels(fileBody string) []string {
 	return kernels
 }
 
-func backupDefaultsFile() error {
-	f, err := os.Open(*grubDefaultsFile)
+func backupDefaultsFile(name string) error {
+	contents, err := readFile(name)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	fbak, err := os.Create(*grubDefaultsFile + ".bak")
+	fbak, err := os.Create(name + ".bak")
 	defer fbak.Close()
 
-	fbytes, err := io.ReadAll(f)
-	if err != nil {
-		return err
-	}
-
-	_, err = fbak.Write(fbytes)
+	_, err = fbak.Write(contents)
 	return err
 }
 
@@ -123,10 +139,10 @@ func readReducedDefaults(f io.Reader) ([]string, error) {
 	return reduced, nil
 }
 
-func writeNewDefault(kernel string) error {
-	f, err := os.OpenFile(*grubDefaultsFile, os.O_RDWR, 0000 /* not used, file exists */)
+func writeNewDefault(kernel string, defaultsName string) error {
+	f, err := os.OpenFile(defaultsName, os.O_RDWR, 0000 /* not used, file exists */)
 	if err != nil {
-		log.Printf("opening %s: %s", *grubDefaultsFile, err)
+		log.Printf("opening %s: %s", defaultsName, err)
 		return err
 	}
 	defer f.Close()
