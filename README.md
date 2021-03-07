@@ -11,3 +11,6 @@ user, then writing to `GRUB_DEFAULT` in /etc/default/grub.
 
 By default it will run `update-grub2` on it's own.
 
+Symlink the installed binary to somewhere on root's $PATH,
+like /sbin.
+
